@@ -1,6 +1,6 @@
 # Kermut
 
-This is the official code repository for the NeurIPS 2024 Spotlight paper  _Kermut: Composite kernel regression for protein variant effects_ ([preprint](https://arxiv.org/abs/2407.00002)).
+This is the official code repository for the NeurIPS 2024 Spotlight paper [_Kermut: Composite kernel regression for protein variant effects_](https://proceedings.neurips.cc/paper_files/paper/2024/hash/34547650b2ca69d91f3b3c3ae8b21962-Abstract-Conference.html).
 
 
 ## Overview
@@ -43,7 +43,8 @@ curl -o models/esm2_t33_650M_UR50D-contact-regression.pt https://dl.fbaipublicfi
 This section describes how to access the data that was used to generate the results. To reproduce _all_ results from scratch, follow all steps in this section and in the [Data preprocessing](#data-preprocessing) section. To reproduce the benchmark results using precomputed resources (ESM-2 embeddings, conditional amino-acid distributions, etc.) see the section on [precomputed resources](#precomputed-resources).
 
 Kermut is evaluated on the ProteinGym benchmark ([paper](https://papers.nips.cc/paper_files/paper/2023/hash/cac723e5ff29f65e3fcbb0739ae91bee-Abstract-Datasets_and_Benchmarks.html), [repo](https://github.com/OATML-Markslab/ProteinGym)).
-For full details on downloading the relevant data, please see the ProteinGym [resources](https://github.com/OATML-Markslab/ProteinGym?tab=readme-ov-file#resources). In the following, commands are provided to extract the relevant data.
+For full details on downloading the relevant data, please see the ProteinGym [resources](https://github.com/OATML-Markslab/ProteinGym?tab=readme-ov-file#resources). In the following, commands are provided to extract the relevant data. 
+_If the ProteinGym links can no longer be accessed, please refer to the [official ProteinGym repository](https://github.com/OATML-Markslab/ProteinGym)._
 
 - __Reference file__: A [reference file](https://github.com/OATML-Markslab/ProteinGym/blob/main/reference_files/DMS_substitutions.csv) with details on all assays can be downloaded from the ProteinGym repo and should be saved as `data/DMS_substitutions.csv`
 
@@ -55,7 +56,7 @@ curl -o data/DMS_substitutions.csv https://raw.githubusercontent.com/OATML-Marks
 - __Assay data__: All assays (with CV folds) can be downloaded and extracted to `data`. Run the following to download and extract all single-mutant assays. Assays will be placed in `data/cv_folds_singles_substitutions`:
 ```bash
 # Download zip archive
-curl -o cv_folds_singles_substitutions.zip https://marks.hms.harvard.edu/proteingym/cv_folds_singles_substitutions.zip
+curl -o cv_folds_singles_substitutions.zip https://marks.hms.harvard.edu/proteingym/ProteinGym_v1.3/cv_folds_singles_substitutions.zip
 # Unpack and remove zip archive
 unzip cv_folds_singles_substitutions.zip -d data
 rm cv_folds_singles_substitutions.zip
@@ -66,7 +67,7 @@ rm cv_folds_singles_substitutions.zip
 
 ```bash
 # Download zip archive
-curl -o ProteinGym_AF2_structures.zip https://marks.hms.harvard.edu/proteingym/ProteinGym_AF2_structures.zip
+curl -o ProteinGym_AF2_structures.zip https://marks.hms.harvard.edu/proteingym/ProteinGym_v1.3/ProteinGym_AF2_structures.zip
 # Unpack and remove zip archive
 unzip ProteinGym_AF2_structures.zip -d data/structures/pdbs
 rm ProteinGym_AF2_structures.zip
@@ -76,7 +77,7 @@ rm ProteinGym_AF2_structures.zip
 
 ```bash
 # Download zip archive
-curl -o zero_shot_substitutions_scores.zip https://marks.hms.harvard.edu/proteingym/zero_shot_substitutions_scores.zip
+curl -o zero_shot_substitutions_scores.zip https://marks.hms.harvard.edu/proteingym/ProteinGym_v1.3/zero_shot_substitutions_scores.zip
 unzip zero_shot_substitutions_scores.zip -d data/zero_shot_fitness_predictions
 # Unpack and remove zip archive
 rm zero_shot_substitutions_scores.zip
@@ -170,13 +171,13 @@ python proteingym_benchmark.py --multirun \
 ## Postprocessing
 To compute Spearman correlation and MSE per assay and cv-scheme, run
 ```bash
-python -m kermut.cmdline.process_results.merge_results \
+python -m kermut.cmdline.process_results.process_model_scores \
     dataset=benchmark
 ```
 This will compute results for all models stored in the `model_names.benchmark` list in `kermut/hydra_configs/postprocessing/default.yaml`.
 For a single model, run
 ```bash
-python -m kermut.cmdline.process_results.merge_results \
+python -m kermut.cmdline.process_results.process_model_scores \
     dataset=benchmark \
     "model_names=[kermut]"
 ```

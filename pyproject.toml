@@ -6,6 +6,9 @@ authors = [{name = "Peter Mørch Groth", email = "petermoerchgroth@gmail.com"}]
 readme = "README.md"
 requires-python = ">=3.10"
 
+[project.scripts]
+kermut-one-liner = "kermut.cmdline.one_liner:app"
+
 [build-system]
 requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"

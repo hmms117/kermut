@@ -1,4 +1,5 @@
 import hydra
+import torch
 
 from gpytorch.models import ExactGP
 from gpytorch.means import ConstantMean, LinearMean
@@ -52,6 +53,7 @@ class KermutGP(ExactGP):
         **kwargs,
     ):
         super().__init__(train_inputs, train_targets, likelihood)
+        self._composite = composite
         if composite:
             self.covar_module = CompositeKernel(
                 sequence_kernel=kernel_cfg.sequence_kernel,
@@ -67,9 +69,41 @@ class KermutGP(ExactGP):
         else:
             self.mean_module = ConstantMean()
 
-    def forward(self, x_toks, x_embed, x_zero=None) -> MultivariateNormal:
+    @staticmethod
+    def _unpack_composite_inputs(inputs):
+        if len(inputs) == 3:
+            return inputs
+        if len(inputs) == 2:
+            x_toks, x_embed = inputs
+            return x_toks, x_embed, None
+        raise ValueError("Composite kernel expects two or three inputs.")
+
+    @staticmethod
+    def _unpack_sequence_inputs(inputs):
+        if len(inputs) == 1:
+            return inputs[0], None
+        if len(inputs) == 2:
+            first, second = inputs
+            if isinstance(first, torch.Tensor) and first.dtype in (torch.long, torch.int64):
+                return second, None
+            return first, second
+        if len(inputs) == 3:
+            _, x_embed, x_zero = inputs
+            return x_embed, x_zero
+        raise ValueError("Sequence kernel expects between one and three inputs.")
+
+    def forward(self, *inputs) -> MultivariateNormal:
+        if self._composite:
+            x_toks, x_embed, x_zero = self._unpack_composite_inputs(inputs)
+            if x_zero is None:
+                x_zero = x_toks
+            mean_x = self.mean_module(x_zero)
+            covar_x = self.covar_module((x_toks, x_embed))
+            return MultivariateNormal(mean_x, covar_x)
+
+        x_embed, x_zero = self._unpack_sequence_inputs(inputs)
         if x_zero is None:
-            x_zero = x_toks
+            x_zero = x_embed
         mean_x = self.mean_module(x_zero)
-        covar_x = self.covar_module((x_toks, x_embed))
+        covar_x = self.covar_module(x_embed)
         return MultivariateNormal(mean_x, covar_x)

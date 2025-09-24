@@ -123,7 +123,7 @@ The structure-conditioned amino acid distributions for all residues and assays, 
 ```
 bash example_scripts/conditional_probabilities.sh
 ```
-For a single dataset, see `example_scripts/conditional_probabilities_single.sh` or `example_scripts/conditional_probabilities_all.sh`. This generates per-assay directories in `data/conditional_probs/raw_ProteinMPNN_outputs`. After this, postprocessing for easier access is performed via
+The script defaults to reading assay identifiers from `data/DMS_substitutions.csv` but honours an `ASSAYS_FILE` environment variable if set. For a single dataset, see `example_scripts/conditional_probabilities_single.sh` or `example_scripts/conditional_probabilities_all.sh`. This generates per-assay directories in `data/conditional_probs/raw_ProteinMPNN_outputs`. After this, postprocessing for easier access is performed via
 ```bash
 python -m kermut.cmdline.preprocess_data.extract_ProteinMPNN_probs \ 
     dataset=all

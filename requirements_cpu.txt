@@ -7,7 +7,8 @@ gpytorch
 hydra-core
 omegaconf
 typer
-numpy
+# Pin NumPy to the 1.26 minor release to match the PyTorch wheel ABI.
+numpy>=1.26,<1.27
 pandas
 scipy
 matplotlib

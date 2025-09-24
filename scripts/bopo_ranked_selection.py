@@ -1,4 +1,9 @@
-"""Typer CLI exposing a BOPO-style Bayesian optimisation loop for Kermut."""
+"""Rank existing assay variants with a BOPO-inspired acquisition function.
+
+In contrast to ``bopo_policy_learning`` (which trains a generative mutation
+policy) this interface computes acquisition values for the multi-objective assay
+table directly, producing a Pareto-diverse batch of existing variants.
+"""
 
 from __future__ import annotations
 
@@ -9,8 +14,8 @@ import numpy as np
 import pandas as pd
 import typer
 
-from .utils_data import PreparedDataset, prepare_multiobjective_dataset, prep_kermut
-from .utils_pareto import non_dominated_sorting, select_diverse
+from scripts.datasets import PreparedDataset, prepare_multiobjective_dataset, prep_kermut
+from scripts.pareto_pandas import non_dominated_sorting, select_diverse
 
 app = typer.Typer(help="BOPO-inspired Bayesian optimisation front-end for Kermut assays.")
 

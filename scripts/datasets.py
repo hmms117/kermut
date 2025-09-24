@@ -241,7 +241,7 @@ def add_directional_scores(
     df: pd.DataFrame,
     configs: Sequence[ObjectiveConfig],
 ) -> pd.DataFrame:
-    """Attach direction-adjusted and weighted scores required by the strategies."""
+    """Attach direction-adjusted and weighted scores required by the planners."""
 
     scored = df.copy()
     score = np.zeros(len(scored), dtype=float)
@@ -320,7 +320,7 @@ def prep_kermut(
     fine_tune: bool = True,
     extra_config: Optional[Mapping[str, object]] = None,
 ) -> object:
-    """Placeholder for integrating Kermut fine-tuning within the strategies."""
+    """Placeholder for integrating Kermut fine-tuning within the planners."""
 
     warnings.warn(
         "prep_kermut is a stub. Plug in your project-specific fine-tuning routine.",

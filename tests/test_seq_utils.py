@@ -4,7 +4,7 @@ import pytest
 
 np = pytest.importorskip("numpy")
 
-from kermut_ext.seq_utils import count_muts, propose_neighbors
+from scripts.sequences import count_muts, propose_neighbors
 
 
 def test_propose_neighbors_respects_bounds() -> None:

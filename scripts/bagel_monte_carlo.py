@@ -1,4 +1,11 @@
-"""BAGEL-style multi-objective exploration powered by Kermut."""
+"""Monte Carlo BAGEL-style exploration driven by a generative proposal policy.
+
+This script performs stochastic search over sequence space by repeatedly
+proposing neighbours of the current best design.  It complements
+``bagel_ranked_selection`` which instead re-ranks an existing assay table.
+Both entry points operate on the shared multi-objective tabular format where
+each objective is provided as a separate column.
+"""
 
 from __future__ import annotations
 
@@ -9,10 +16,10 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import typer
 
-from kermut_ext.io_utils import load_assays, write_candidates
-from kermut_ext.kermut_adapter import KermutAdapter
-from kermut_ext.pareto import pareto_front, select_diverse
-from kermut_ext.seq_utils import count_muts, propose_neighbors
+from scripts.io import load_assays, write_candidates
+from scripts.model_adapter import KermutAdapter
+from scripts.pareto_numpy import pareto_front, select_diverse
+from scripts.sequences import count_muts, propose_neighbors
 
 app = typer.Typer(help="BAGEL-inspired Monte Carlo exploration on top of Kermut.")
 

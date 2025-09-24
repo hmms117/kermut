@@ -181,3 +181,60 @@ python -m kermut.cmdline.process_results.process_model_scores \
     dataset=benchmark \
     "model_names=[kermut]"
 ```
+
+## BOPO multi-objective pipeline
+
+The repository also ships with a lightweight BOPO-style command line pipeline
+(`bopo_multiobj_pipeline.py`) that stitches together data cleaning, anchor
+detection, preference learning, DMS-informed candidate enumeration and
+multi-objective selection.  The script consumes one or more TSV assay exports,
+detects anchor sequences appearing across batches (e.g., controls run under new
+conditions), trains a preference network on the induced comparisons and then
+balances predicted preference scores with Hamming-distance diversity using
+Pareto ranking to produce the next experimental batch.
+
+### Input expectations
+
+- TSV files must contain at least the columns `batch`, `sequence`, `objective`
+  and `reference_sequence`.  Optional columns (for example `condition`) are
+  preserved in the exported metadata.
+- Multiple TSV files can be supplied; the pipeline merges them before anchor
+  detection and preference training.
+
+### Example usage
+
+```bash
+python bopo_multiobj_pipeline.py \
+    --input data/my_assay_batch1.tsv data/my_assay_batch2.tsv \
+    --output-dir outputs/bopo_run \
+    --num-select 24 \
+    --max-mutations 2 \
+    --candidate-pool-size 128 \
+    --diversity-weight 0.4 \
+    --export-pairs outputs/bopo_run/pairs.tsv \
+    --export-candidates outputs/bopo_run/candidates.tsv
+```
+
+### Outputs
+
+- `next_batch.tsv` – Pareto-ranked selections with predicted scores, diversity
+  statistics, mutation annotations and approximate gains inherited from the
+  DMS-driven enumeration.
+- `--export-pairs` – optional TSV containing every generated preference pair,
+  including cross-batch anchors and the objective deltas that induced each
+  comparison.
+- `--export-candidates` – optional TSV with the scored candidate pool and the
+  realised Hamming distances to the finally selected batch.
+
+### Selection controls
+
+- `--num-select` sets the size of the next batch.
+- `--max-mutations` and `--candidate-pool-size` control the DMS-driven
+  enumeration budget.
+- `--diversity-weight` and `--min-hamming-distance` trade off predicted
+  preference scores against sequence diversity when computing the Pareto front.
+- `--learning-rate`, `--epochs` and `--l2` tune the preference net optimiser.
+
+An executable example that exercises the full pipeline on a five-batch assay
+with shifting conditions is provided in
+`example_scripts/bopo_multiobj_pipeline_test.py`.

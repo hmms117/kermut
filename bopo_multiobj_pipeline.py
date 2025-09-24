@@ -19,6 +19,8 @@ import argparse
 import csv
 import math
 import os
+import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from statistics import mean
@@ -193,6 +195,66 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--export-pairs", default="", help="Optional TSV path to export generated preference pairs")
     parser.add_argument("--export-candidates", default="", help="Optional TSV path for the full candidate pool")
     parser.add_argument("--random-seed", type=int, default=0, help="Seed controlling deterministic orderings")
+    parser.add_argument(
+        "--kermut-singles",
+        default="",
+        help="Optional CSV/TSV with Kermut posterior means for single mutants",
+    )
+    parser.add_argument(
+        "--kermut-sequence-column",
+        default="sequence",
+        help="Column in the Kermut file containing variant sequences",
+    )
+    parser.add_argument(
+        "--kermut-score-column",
+        default="posterior_mean",
+        help="Column in the Kermut file containing predicted variant effects",
+    )
+    parser.add_argument(
+        "--kermut-delimiter",
+        default=",",
+        help="Delimiter used in the Kermut single mutant file (default comma)",
+    )
+    parser.add_argument(
+        "--kermut-runner",
+        nargs="+",
+        default=[],
+        help=(
+            "Command used to generate Kermut single-mutant posteriors from the assay TSV. "
+            "Provide, for example, `python -m kermut.cmdline.one_liner run`."
+        ),
+    )
+    parser.add_argument(
+        "--kermut-run-output-dir",
+        default="kermut_outputs",
+        help="Sub-directory (relative to --output-dir) where runner artefacts are written",
+    )
+    parser.add_argument(
+        "--kermut-run-sequence-column",
+        default="sequence",
+        help="Sequence column name supplied to the runner command",
+    )
+    parser.add_argument(
+        "--kermut-run-target-column",
+        default="objective",
+        help="Target/fitness column name supplied to the runner command",
+    )
+    parser.add_argument(
+        "--kermut-run-mutation-column",
+        default="mutations",
+        help="Mutation annotation column name supplied to the runner command",
+    )
+    parser.add_argument(
+        "--kermut-run-extra-args",
+        nargs="*",
+        default=None,
+        help="Additional arguments appended to the runner command",
+    )
+    parser.add_argument(
+        "--kermut-run-training-file",
+        default="training_posterior.csv",
+        help="File produced by the runner containing posterior statistics",
+    )
     return parser.parse_args(argv)
 
 
@@ -409,12 +471,22 @@ def build_training_data(
     return training_data
 
 
+def compute_reference_baseline(
+    records: Sequence[Dict[str, object]], reference_sequence: str
+) -> Optional[float]:
+    reference_objectives = [float(record["objective"]) for record in records if record["sequence"] == reference_sequence]
+    if reference_objectives:
+        return mean(reference_objectives)
+    return None
+
+
 def compute_mutation_scores(
     records: Sequence[Dict[str, object]],
     reference_sequence: str,
+    baseline: Optional[float] = None,
 ) -> Dict[str, float]:
-    reference_objectives = [float(record["objective"]) for record in records if record["sequence"] == reference_sequence]
-    baseline = mean(reference_objectives) if reference_objectives else 0.0
+    if baseline is None:
+        baseline = compute_reference_baseline(records, reference_sequence) or 0.0
     score_accumulator: Dict[str, float] = {}
     count_accumulator: Dict[str, int] = {}
     for record in records:
@@ -431,6 +503,192 @@ def compute_mutation_scores(
         if count:
             mutation_scores[mutation] = total / float(count)
     return mutation_scores
+
+
+def load_kermut_single_mutation_scores(
+    path: str,
+    sequence_column: str,
+    score_column: str,
+    reference_sequence: str,
+    delimiter: str,
+    fallback_baseline: Optional[float],
+) -> Dict[str, float]:
+    file_path = Path(path)
+    if not file_path.exists():
+        raise FileNotFoundError(f"Kermut single mutant file not found: {path}")
+    records: List[Tuple[str, float]] = []
+    with open(file_path, "r", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle, delimiter=delimiter)
+        if reader.fieldnames is None:
+            raise ValueError("Kermut single mutant file is missing a header row")
+        for row in reader:
+            sequence = row.get(sequence_column)
+            score = _to_float(row.get(score_column))
+            if sequence is None or score is None:
+                continue
+            sequence = sequence.strip()
+            if not sequence:
+                continue
+            records.append((sequence, score))
+    if not records:
+        return {}
+    baseline = fallback_baseline
+    for sequence, score in records:
+        if sequence == reference_sequence:
+            baseline = score
+            break
+    if baseline is None:
+        baseline = 0.0
+    totals: Dict[str, float] = {}
+    counts: Dict[str, int] = {}
+    for sequence, score in records:
+        if sequence == reference_sequence or len(sequence) != len(reference_sequence):
+            continue
+        mutations = sequence_mutations(reference_sequence, sequence)
+        if len(mutations) != 1:
+            continue
+        mutation = mutations[0]
+        totals[mutation] = totals.get(mutation, 0.0) + (score - baseline)
+        counts[mutation] = counts.get(mutation, 0) + 1
+    mutation_scores: Dict[str, float] = {}
+    for mutation, total in totals.items():
+        count = counts[mutation]
+        if count:
+            mutation_scores[mutation] = total / float(count)
+    return mutation_scores
+
+
+def prepare_kermut_runner_input(
+    records: Sequence[Dict[str, object]],
+    reference_sequence: str,
+    sequence_column: str,
+    target_column: str,
+    mutation_column: Optional[str],
+    path: Path,
+    baseline: Optional[float],
+) -> None:
+    rows: List[Tuple[str, float, Optional[str]]] = []
+    seen_sequences: set[str] = set()
+    for record in records:
+        sequence = str(record["sequence"])
+        if sequence in seen_sequences:
+            continue
+        objective = float(record["objective"])
+        mutations: List[str] = record.get("mutations", [])  # type: ignore[assignment]
+        if sequence == reference_sequence:
+            rows.append((sequence, objective, "WT" if mutation_column else None))
+        elif len(mutations) == 1:
+            rows.append((sequence, objective, mutations[0] if mutation_column else None))
+        else:
+            continue
+        seen_sequences.add(sequence)
+    if not rows:
+        raise ValueError("No single mutants were found for the Kermut runner input")
+    if baseline is not None and not any(sequence == reference_sequence for sequence, _, _ in rows):
+        rows.append((reference_sequence, baseline, "WT" if mutation_column else None))
+    with open(path, "w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle)
+        headers = [sequence_column, target_column]
+        if mutation_column:
+            headers.append(mutation_column)
+        writer.writerow(headers)
+        for sequence, objective, mutation in rows:
+            row: List[object] = [sequence, f"{objective:.12f}"]
+            if mutation_column:
+                row.append(mutation or "")
+            writer.writerow(row)
+
+
+def run_kermut_runner(
+    records: Sequence[Dict[str, object]],
+    reference_sequence: str,
+    command: Sequence[str],
+    output_dir: Path,
+    sequence_column: str,
+    target_column: str,
+    mutation_column: Optional[str],
+    extra_args: Optional[Sequence[str]],
+    training_filename: str,
+    fallback_baseline: Optional[float],
+) -> Dict[str, float]:
+    if not command:
+        raise ValueError("Kermut runner command was not provided")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_input = Path(tmpdir) / "kermut_runner_input.csv"
+        prepare_kermut_runner_input(
+            records,
+            reference_sequence,
+            sequence_column,
+            target_column,
+            mutation_column,
+            tmp_input,
+            fallback_baseline,
+        )
+        runner_cmd = list(command)
+        runner_cmd.append(str(tmp_input))
+        runner_cmd.extend(["--wild-type", reference_sequence])
+        runner_cmd.extend(["--output-dir", str(output_dir)])
+        runner_cmd.extend(["--target-col", target_column])
+        runner_cmd.extend(["--sequence-col", sequence_column])
+        if mutation_column:
+            runner_cmd.extend(["--mutation-col", mutation_column])
+        if extra_args:
+            runner_cmd.extend(extra_args)
+        try:
+            subprocess.run(runner_cmd, check=True)
+        except FileNotFoundError as exc:
+            raise FileNotFoundError(
+                f"Failed to launch Kermut runner command '{command[0]}'"
+            ) from exc
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(
+                "Kermut runner exited with a non-zero status"
+            ) from exc
+        training_path = output_dir / training_filename
+        if not training_path.exists():
+            raise FileNotFoundError(
+                f"Kermut runner did not produce expected file: {training_path}"
+            )
+        mutation_scores: Dict[str, List[float]] = {}
+        baseline = fallback_baseline
+        with open(training_path, "r", encoding="utf-8") as handle:
+            reader = csv.DictReader(handle)
+            if reader.fieldnames is None:
+                raise ValueError(
+                    f"Kermut runner output {training_path} is missing a header row"
+                )
+            for row in reader:
+                sequence = (row.get(sequence_column) or "").strip()
+                if not sequence:
+                    continue
+                posterior_value = _to_float(row.get("posterior_mean"))
+                if posterior_value is None:
+                    continue
+                if sequence == reference_sequence:
+                    baseline = posterior_value
+                    continue
+                mutation_label = (row.get(mutation_column) or "").strip() if mutation_column else ""
+                mutation: Optional[str] = None
+                if mutation_label and mutation_label.upper() not in {"WT", "-"}:
+                    tokens = [token for token in mutation_label.replace(",", ";").split(";") if token]
+                    if len(tokens) == 1:
+                        mutation = tokens[0]
+                if mutation is None:
+                    derived = sequence_mutations(reference_sequence, sequence)
+                    if len(derived) == 1:
+                        mutation = derived[0]
+                if mutation is None:
+                    continue
+                mutation_scores.setdefault(mutation, []).append(posterior_value)
+        baseline_value = baseline if baseline is not None else fallback_baseline
+        if baseline_value is None:
+            baseline_value = 0.0
+        averaged: Dict[str, float] = {}
+        for mutation, values in mutation_scores.items():
+            if values:
+                averaged[mutation] = sum(values) / float(len(values)) - baseline_value
+        return averaged
 
 
 def enumerate_candidates(
@@ -701,7 +959,36 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         epochs=args.epochs,
     )
     preference_net.train(training_data)
-    mutation_scores = compute_mutation_scores(aggregated_records, reference_sequence)
+    baseline = compute_reference_baseline(aggregated_records, reference_sequence)
+    output_dir = Path(args.output_dir)
+    mutation_scores: Dict[str, float] = {}
+    if args.kermut_runner:
+        try:
+            mutation_scores = run_kermut_runner(
+                records=aggregated_records,
+                reference_sequence=reference_sequence,
+                command=args.kermut_runner,
+                output_dir=output_dir / args.kermut_run_output_dir,
+                sequence_column=args.kermut_run_sequence_column,
+                target_column=args.kermut_run_target_column,
+                mutation_column=args.kermut_run_mutation_column or None,
+                extra_args=args.kermut_run_extra_args or [],
+                training_filename=args.kermut_run_training_file,
+                fallback_baseline=baseline,
+            )
+        except Exception as exc:
+            raise RuntimeError(f"Kermut runner failed: {exc}") from exc
+    if not mutation_scores and args.kermut_singles:
+        mutation_scores = load_kermut_single_mutation_scores(
+            path=args.kermut_singles,
+            sequence_column=args.kermut_sequence_column,
+            score_column=args.kermut_score_column,
+            reference_sequence=reference_sequence,
+            delimiter=args.kermut_delimiter,
+            fallback_baseline=baseline,
+        )
+    if not mutation_scores:
+        mutation_scores = compute_mutation_scores(aggregated_records, reference_sequence, baseline)
     candidate_proposals = enumerate_candidates(
         reference_sequence,
         mutation_scores,
@@ -737,7 +1024,6 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         args.min_hamming_distance,
         reference_length,
     )
-    output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     export_selection(output_dir / "next_batch.tsv", selections)
     if args.export_pairs:

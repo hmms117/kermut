@@ -1,0 +1,17 @@
+# CPU-only dependencies for running Kermut with uv inside Codex environments.
+# The install.sh helper installs torch from the CPU-only index exposed at
+# https://download.pytorch.org/whl/cpu to avoid CUDA-enabled wheels.
+torch
+fair-esm
+gpytorch
+hydra-core
+omegaconf
+typer
+numpy
+pandas
+scipy
+matplotlib
+seaborn
+h5py
+biopython
+tqdm

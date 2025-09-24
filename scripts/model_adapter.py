@@ -1,4 +1,4 @@
-"""Adapter around the core Kermut model used by the Typer CLIs."""
+"""Adapter around the core Kermut model used by the planning scripts."""
 
 from __future__ import annotations
 

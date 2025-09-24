@@ -1,6 +1,7 @@
 """Sequence helpers for the Typer CLIs."""
 
 from __future__ import annotations
+"""Sequence utilities shared by the planning scripts."""
 
 from typing import Iterable, Iterator, Optional
 

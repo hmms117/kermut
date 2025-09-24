@@ -1,4 +1,10 @@
-"""BOPO-style preference-optimised proposal learning for Kermut."""
+"""Preference-learning BOPO workflow that trains a generative proposal policy.
+
+The routine differs from ``bopo_ranked_selection`` which operates directly on
+the observed assay table.  Here we alternate between learning a mutation policy
+and sampling fresh variants, making it suitable for the shared multi-objective
+format with one column per target property.
+"""
 
 from __future__ import annotations
 
@@ -10,9 +16,9 @@ import torch
 import torch.nn as nn
 import typer
 
-from kermut_ext.io_utils import load_assays, write_candidates
-from kermut_ext.kermut_adapter import KermutAdapter
-from kermut_ext.pareto import pareto_front, select_diverse
+from scripts.io import load_assays, write_candidates
+from scripts.model_adapter import KermutAdapter
+from scripts.pareto_numpy import pareto_front, select_diverse
 
 AA_VOCAB = "ACDEFGHIKLMNPQRSTVWY"
 

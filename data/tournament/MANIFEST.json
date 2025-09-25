@@ -1,0 +1,8 @@
+{
+  "dataset": "Protein Engineering Tournament Pilot 2023",
+  "repository": "https://github.com/the-protein-engineering-tournament/pet-pilot-2023",
+  "commit": "666b1a4f711ca5ce278808b188bef9da0aa74b28",
+  "retrieved_on": "2025-09-25",
+  "description": "Pilot 2023 competition dataset with multi-target measurements.",
+  "notes": "Submodule managed via data/tournament/vendor. Do not edit vendor contents directly."
+}

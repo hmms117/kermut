@@ -1,0 +1,8 @@
+{
+  "dataset": "AAV Fit4Function",
+  "repository": "https://github.com/vector-engineering/fit4function",
+  "commit": "6bfc2ebfe4abcd45cc6fe737e4700242a5090fee",
+  "retrieved_on": "2025-09-25",
+  "description": "Multiplexed adeno-associated virus functional screening dataset.",
+  "notes": "Vendor data stored as submodule under data/aav_fit4function/vendor."
+}

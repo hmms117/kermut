@@ -3,6 +3,7 @@
 __all__ = [
     "bagel_monte_carlo",
     "bagel_ranked_selection",
+    "bopo_hydra_launcher",
     "bopo_policy_learning",
     "bopo_ranked_selection",
     "datasets",

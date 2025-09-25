@@ -16,9 +16,9 @@ import torch
 import torch.nn as nn
 import typer
 
-from scripts.io import load_assays, write_candidates
-from scripts.model_adapter import KermutAdapter
-from scripts.pareto_numpy import pareto_front, select_diverse
+from helper_scripts.io import load_assays, write_candidates
+from helper_scripts.model_adapter import KermutAdapter
+from helper_scripts.pareto_numpy import pareto_front, select_diverse
 
 AA_VOCAB = "ACDEFGHIKLMNPQRSTVWY"
 

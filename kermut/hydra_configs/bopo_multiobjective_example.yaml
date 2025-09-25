@@ -3,7 +3,7 @@ defaults:
   - override hydra/job_logging: disabled
 
 # Assay table with sequence column + raw objectives.
-data: example_scripts/data/comprehensive_double_mutant_assay.tsv
+data: examples/data/comprehensive_double_mutant_assay.tsv
 
 # Path to a trained Kermut checkpoint (.pt) compatible with the assay features.
 checkpoint: path/to/kermut_checkpoint.pt
@@ -23,7 +23,7 @@ weights:
   - 0.6
   - 0.4
 
-# Optimisation hyper-parameters forwarded to scripts.bopo_policy_learning.suggest.
+# Optimisation hyper-parameters forwarded to helper_scripts.bopo_policy_learning.suggest.
 epochs: 30
 B: 256
 K: 24

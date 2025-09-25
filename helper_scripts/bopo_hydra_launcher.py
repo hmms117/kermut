@@ -9,7 +9,7 @@ import typer
 from hydra import compose, initialize
 from omegaconf import OmegaConf
 
-from scripts import bopo_policy_learning
+from helper_scripts import bopo_policy_learning
 
 app = typer.Typer(help="Run BOPO policy learning using a Hydra configuration file.")
 

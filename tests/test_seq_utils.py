@@ -4,7 +4,7 @@ import pytest
 
 np = pytest.importorskip("numpy")
 
-from scripts.sequences import count_muts, propose_neighbors
+from helper_scripts.sequences import count_muts, propose_neighbors
 
 
 def test_propose_neighbors_respects_bounds() -> None:

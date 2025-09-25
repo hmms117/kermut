@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
+import sys
 
-from example_scripts.bopo_multiobj_pipeline_comprehensive_example import (
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from examples.bopo_cli_comprehensive_example import (
     DATASET_PATH,
     mutation_count,
     run_comprehensive_example,

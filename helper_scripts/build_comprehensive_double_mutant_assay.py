@@ -3,7 +3,7 @@
 
 This script fetches the amino-acid sequence for a protein from the RCSB PDB,
 constructs 500 double-mutant variants together with anchor single mutants and
-exports a TSV that can be consumed by ``bopo_multiobj_pipeline.py``.
+exports a TSV that can be consumed by ``bopo_cli.py``.
 
 The generated TSV contains two experimental targets:
 
@@ -380,7 +380,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pdb-id", default="1CRN", help="PDB identifier to fetch the reference sequence from (default 1CRN)")
     parser.add_argument(
         "--output",
-        default=str(Path(__file__).resolve().parents[1] / "example_scripts" / "data" / "comprehensive_double_mutant_assay.tsv"),
+        default=str(Path(__file__).resolve().parents[1] / "examples" / "data" / "comprehensive_double_mutant_assay.tsv"),
         help="Destination TSV path",
     )
     parser.add_argument(

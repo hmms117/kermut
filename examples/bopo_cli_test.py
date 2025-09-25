@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from bopo_multiobj_pipeline import main
+from bopo_cli import main
 
 
 def run_pipeline_test() -> None:

@@ -145,6 +145,31 @@ If not relying on pre-computed zero-shot scores from ProteinGym, they can be com
 python -m kermut.cmdline.preprocess_data.extract_esm2_zero_shots \
     dataset=all
 ```
+
+### Dataset vendor examples
+
+The repository provides lightweight scripts that demonstrate how to load and
+inspect each vendor dataset that lives under `data/`.
+
+1. Ensure the vendor submodules are available:
+
+   ```bash
+   git submodule update --init --recursive
+   ```
+
+2. Run the example scripts to preview the raw tables:
+
+   ```bash
+   python example_scripts/pet_pilot_2023_example.py
+   python example_scripts/aav_fit4function_example.py
+   python example_scripts/pet_tournament_2024_example.py
+   ```
+
+   The PET Tournament 2024 script currently reports that the AlignBio-hosted
+   dataset is private until credentials are granted, while the other scripts
+   print column metadata and a small row preview for the CSV tables contained
+   in the vendor repositories.
+
 # Usage
 
 The implementation of Kermut relies on [Hydra](https://hydra.cc/). 

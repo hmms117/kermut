@@ -1,0 +1,8 @@
+{
+  "dataset": "Protein Engineering Tournament 2024",
+  "repository": "https://github.com/alignbio/protein-engineering-tournament-2024",
+  "commit": null,
+  "retrieved_on": null,
+  "description": "AlignBio-hosted 2024 Protein Engineering Tournament dataset (access pending).",
+  "notes": "Submodule could not be cloned without credentials. Initialize vendor/ once access is granted."
+}

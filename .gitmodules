@@ -1,0 +1,6 @@
+[submodule "dataset_pet2023"]
+	path = data/tournament/vendor
+	url = https://github.com/the-protein-engineering-tournament/pet-pilot-2023
+[submodule "dataset_aav_fit4function"]
+	path = data/aav_fit4function/vendor
+	url = https://github.com/vector-engineering/fit4function

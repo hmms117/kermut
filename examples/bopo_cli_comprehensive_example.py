@@ -1,4 +1,4 @@
-"""Comprehensive end-to-end example for ``bopo_multiobj_pipeline``.
+"""Comprehensive end-to-end example for ``bopo_cli``.
 
 This script demonstrates how to stage the next experimental batch from a rich
 synthetic assay capturing two competing objectives:
@@ -6,7 +6,7 @@ synthetic assay capturing two competing objectives:
 * ``activity_score`` is maximised – higher values indicate improved activity.
 * ``aggregation_penalty`` is minimised – lower values imply better developability.
 
-The accompanying TSV (``example_scripts/data/comprehensive_double_mutant_assay.tsv``)
+The accompanying TSV (``examples/data/comprehensive_double_mutant_assay.tsv``)
 contains 500 double mutants generated from the 1CRN crambin structure together
 with anchor single mutants repeated across the first five batches. Both targets are
 included for transparency and combined into a single ``objective`` column via
@@ -28,7 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from bopo_multiobj_pipeline import main as run_pipeline
+from bopo_cli import main as run_pipeline
 
 DATASET_PATH = Path(__file__).resolve().parent / "data" / "comprehensive_double_mutant_assay.tsv"
 

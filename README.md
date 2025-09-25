@@ -121,9 +121,9 @@ The embeddings are located in `data/embeddings/substitutions_singles/ESM2` (for 
 The structure-conditioned amino acid distributions for all residues and assays, can be computed with ProteinMPNN via
 
 ```
-bash example_scripts/conditional_probabilities.sh
+bash examples/conditional_probabilities.sh
 ```
-The script defaults to reading assay identifiers from `data/DMS_substitutions.csv` but honours an `ASSAYS_FILE` environment variable if set. For a single dataset, see `example_scripts/conditional_probabilities_single.sh` or `example_scripts/conditional_probabilities_all.sh`. This generates per-assay directories in `data/conditional_probs/raw_ProteinMPNN_outputs`. After this, postprocessing for easier access is performed via
+The script defaults to reading assay identifiers from `data/DMS_substitutions.csv` but honours an `ASSAYS_FILE` environment variable if set. For a single dataset, see `examples/conditional_probabilities_single.sh` or `examples/conditional_probabilities_all.sh`. This generates per-assay directories in `data/conditional_probs/raw_ProteinMPNN_outputs`. After this, postprocessing for easier access is performed via
 ```bash
 python -m kermut.cmdline.preprocess_data.extract_ProteinMPNN_probs \ 
     dataset=all
@@ -160,9 +160,9 @@ inspect each vendor dataset that lives under `data/`.
 2. Run the example scripts to preview the raw tables:
 
    ```bash
-   python example_scripts/pet_pilot_2023_example.py
-   python example_scripts/aav_fit4function_example.py
-   python example_scripts/pet_tournament_2024_example.py
+   python examples/pet_pilot_2023_example.py
+   python examples/aav_fit4function_example.py
+   python examples/pet_tournament_2024_example.py
    ```
 
    The PET Tournament 2024 script currently reports that the AlignBio-hosted
@@ -178,7 +178,7 @@ Data paths are defined in `data/paths.yaml` and must match your setup.
 
 To evaluate Kermut on the full benchmark, run the following
 ```bash
-python proteingym_benchmark.py --multirun \
+python kermut.py --multirun \
     dataset=benchmark \
     cv_scheme=fold_random_5,fold_modulo_5,fold_contiguous_5 \
     kernel=kermut  # Default
@@ -186,7 +186,7 @@ python proteingym_benchmark.py --multirun \
 
 To evaluate an alternative kernel (e.g., `kermut_constant_mean` as defined in `kermut/hydra_configs/kernel/kermut_constant_mean.yaml` ) on DMS assay with index 9, run
 ```bash
-python proteingym_benchmark.py --multirun \
+python kermut.py --multirun \
     dataset=single \
     dataset.single.id=9 \
     cv_scheme=fold_random_5,fold_modulo_5,fold_contiguous_5 \
@@ -210,7 +210,7 @@ python -m kermut.cmdline.process_results.process_model_scores \
 ## BOPO multi-objective pipeline
 
 The repository also ships with a lightweight BOPO-style command line pipeline
-(`bopo_multiobj_pipeline.py`) that stitches together data cleaning, anchor
+(`bopo_cli.py`) that stitches together data cleaning, anchor
 detection, preference learning, DMS-informed candidate enumeration and
 multi-objective selection.  The script consumes one or more TSV assay exports,
 detects anchor sequences appearing across batches (e.g., controls run under new
@@ -229,7 +229,7 @@ Pareto ranking to produce the next experimental batch.
 ### Example usage
 
 ```bash
-python bopo_multiobj_pipeline.py \
+python bopo_cli.py \
     --input data/my_assay_batch1.tsv data/my_assay_batch2.tsv \
     --output-dir outputs/bopo_run \
     --num-select 24 \
@@ -262,4 +262,4 @@ python bopo_multiobj_pipeline.py \
 
 An executable example that exercises the full pipeline on a five-batch assay
 with shifting conditions is provided in
-`example_scripts/bopo_multiobj_pipeline_test.py`.
+`examples/bopo_cli_test.py`.

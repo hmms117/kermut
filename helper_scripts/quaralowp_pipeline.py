@@ -402,7 +402,7 @@ def run(
         command: List[str] = [
             sys.executable,
             "-m",
-            "scripts.kermut_bagel",
+            "helper_scripts.kermut_bagel",
             "suggest",
             "--data",
             str(assay_path),
@@ -428,7 +428,7 @@ def run(
         command = [
             sys.executable,
             "-m",
-            "scripts.kermut_bopo",
+            "helper_scripts.kermut_bopo",
             "suggest",
             "--data",
             str(assay_path),

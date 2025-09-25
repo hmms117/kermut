@@ -16,10 +16,10 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import typer
 
-from scripts.io import load_assays, write_candidates
-from scripts.model_adapter import KermutAdapter
-from scripts.pareto_numpy import pareto_front, select_diverse
-from scripts.sequences import count_muts, propose_neighbors
+from helper_scripts.io import load_assays, write_candidates
+from helper_scripts.model_adapter import KermutAdapter
+from helper_scripts.pareto_numpy import pareto_front, select_diverse
+from helper_scripts.sequences import count_muts, propose_neighbors
 
 app = typer.Typer(help="BAGEL-inspired Monte Carlo exploration on top of Kermut.")
 

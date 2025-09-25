@@ -14,8 +14,8 @@ import numpy as np
 import pandas as pd
 import typer
 
-from scripts.datasets import PreparedDataset, prepare_multiobjective_dataset, prep_kermut
-from scripts.pareto_pandas import non_dominated_sorting, select_diverse
+from helper_scripts.datasets import PreparedDataset, prepare_multiobjective_dataset, prep_kermut
+from helper_scripts.pareto_pandas import non_dominated_sorting, select_diverse
 
 app = typer.Typer(help="BAGEL Monte Carlo exploration tailored for multi-objective assays.")
 

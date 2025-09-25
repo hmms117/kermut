@@ -1,0 +1,31 @@
+data_path: data/custom/qlp_expression_subset.tsv
+output_dir: outputs/qlp_expression_subset
+target_columns:
+  - A405_raw
+  - 72C/25C_raw
+mutation_column: Mutations
+group_column: Construct
+metadata_columns:
+  - Design_concept
+  - Type
+wild_type:
+  fill_residue: A
+  sequence_padding: 5
+  overrides: {}
+model:
+  kernel_config: kermut/hydra_configs/kernel/kermut_no_m_constant_mean.yaml
+  lr: 0.1
+  n_steps: 200
+  use_gpu: false
+  top_k_singles: 25
+  candidate_batch: 20
+  max_candidates: 400
+  min_candidate_size: 2
+  max_candidate_size: 2
+proteinmpnn:
+  probabilities_dir:
+  on_diagonal: 0.9
+esm:
+  model_path: models/esm2_t33_650M_UR50D.pt
+  toks_per_batch: 4096
+  use_gpu: false

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import math
 import os
 import subprocess
@@ -64,13 +65,16 @@ class CandidateProposal:
 
 @dataclass
 class CandidateScore:
-    """Stores the predicted score and diversity metadata for a candidate."""
+    """Stores predicted score and diversity metadata for a candidate."""
 
     sequence: str
     score: float
-    distance: int
+    hamming_distance: int
+    kernel_diversity: float
     mutations: List[str]
     approx_gain: float
+    uncertainty: Optional[float] = None
+
 
 @dataclass
 class SelectedCandidate(CandidateScore):
@@ -78,6 +82,7 @@ class SelectedCandidate(CandidateScore):
 
     rank: int = 0
     composite_score: float = 0.0
+    is_anchor: bool = False
 
 
 class MutationFeaturizer:
@@ -254,6 +259,40 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         "--kermut-run-training-file",
         default="training_posterior.csv",
         help="File produced by the runner containing posterior statistics",
+    )
+    parser.add_argument(
+        "--kermut-kernel-cache",
+        default="",
+        help="Optional directory containing cached kernel gram matrices",
+    )
+    parser.add_argument(
+        "--kernel-mode",
+        default="hamming",
+        help=(
+            "Kernel selection mode: 'hamming' for baseline, a specific kernel name, or "
+            "'composite' when providing --kernel-mix."
+        ),
+    )
+    parser.add_argument(
+        "--kernel-mix",
+        default="",
+        help="JSON file describing composite kernel weights produced by Kermut",
+    )
+    parser.add_argument(
+        "--kermut-mu-sigma",
+        default="",
+        help="Optional TSV/CSV with Kermut posterior mean and sigma per sequence",
+    )
+    parser.add_argument(
+        "--use-sigma-objective",
+        choices=["never", "same_condition", "always"],
+        default="never",
+        help="Control whether posterior sigma is used as an exploration objective",
+    )
+    parser.add_argument(
+        "--pareto-objectives",
+        default="score,diversity",
+        help="Comma-separated objectives to maximise (score, diversity, uncertainty)",
     )
     return parser.parse_args(argv)
 
@@ -764,22 +803,205 @@ def hamming_distance(seq_a: str, seq_b: str) -> int:
     return sum(1 for char_a, char_b in zip(seq_a, seq_b) if char_a != char_b)
 
 
-def compute_pareto_front(candidates: Sequence[CandidateScore]) -> List[CandidateScore]:
+def load_kernel_mix(path: Path) -> Dict[str, float]:
+    with open(path, "r", encoding="utf-8") as handle:
+        data = json.load(handle)
+    mix: Dict[str, float] = {}
+    if isinstance(data, list):
+        for entry in data:
+            if not isinstance(entry, dict):
+                continue
+            name = str(entry.get("name", "")).strip()
+            weight = entry.get("weight")
+            if not name or weight is None:
+                continue
+            mix[name] = float(weight)
+    elif isinstance(data, dict):
+        for key, value in data.items():
+            try:
+                mix[str(key)] = float(value)
+            except (TypeError, ValueError):
+                continue
+    else:
+        raise ValueError("Unsupported kernel mix format; expected list or mapping")
+    if not mix:
+        raise ValueError("Kernel mix file did not contain any valid (name, weight) entries")
+    return mix
+
+
+def _infer_delimiter(header_line: str) -> str:
+    return "\t" if header_line.count("\t") >= header_line.count(",") else ","
+
+
+def load_kernel_matrix(path: Path) -> Dict[str, Dict[str, float]]:
+    with open(path, "r", encoding="utf-8") as handle:
+        first_line = handle.readline()
+        if not first_line:
+            raise ValueError(f"Kernel file {path} is empty")
+        delimiter = _infer_delimiter(first_line)
+        header = [token.strip() for token in first_line.strip().split(delimiter)]
+        if len(header) < 2:
+            raise ValueError(f"Kernel file {path} must contain a header row with sequence identifiers")
+        column_sequences = header[1:]
+        matrix: Dict[str, Dict[str, float]] = {}
+        for line in handle:
+            if not line.strip():
+                continue
+            parts = [token.strip() for token in line.strip().split(delimiter)]
+            if len(parts) < len(column_sequences) + 1:
+                continue
+            row_sequence = parts[0]
+            row_values: Dict[str, float] = {}
+            for idx, column_sequence in enumerate(column_sequences):
+                value_str = parts[idx + 1]
+                if not value_str:
+                    continue
+                try:
+                    row_values[column_sequence] = float(value_str)
+                except ValueError:
+                    continue
+            matrix[row_sequence] = row_values
+    return matrix
+
+
+def load_kernel_cache(cache_dir: Path, kernel_names: Sequence[str]) -> Dict[str, Dict[str, Dict[str, float]]]:
+    matrices: Dict[str, Dict[str, Dict[str, float]]] = {}
+    if not cache_dir or not kernel_names:
+        return matrices
+    for kernel_name in kernel_names:
+        candidates = [
+            cache_dir / f"{kernel_name}.tsv",
+            cache_dir / f"{kernel_name}.csv",
+            cache_dir / f"{kernel_name}.txt",
+        ]
+        path = next((candidate for candidate in candidates if candidate.exists()), None)
+        if path is None:
+            continue
+        matrices[kernel_name] = load_kernel_matrix(path)
+    return matrices
+
+
+def _lookup_kernel(
+    matrix: Dict[str, Dict[str, float]],
+    seq_a: str,
+    seq_b: str,
+) -> Optional[float]:
+    row = matrix.get(seq_a)
+    if row is None:
+        row = matrix.get(seq_b)
+        if row is None:
+            return None
+        return row.get(seq_a)
+    value = row.get(seq_b)
+    if value is None:
+        other_row = matrix.get(seq_b)
+        if other_row is None:
+            return None
+        return other_row.get(seq_a)
+    return value
+
+
+class KernelDistanceCalculator:
+    """Computes composite kernel distances with Hamming fallback."""
+
+    def __init__(
+        self,
+        reference_length: int,
+        mode: str,
+        kernel_cache: Dict[str, Dict[str, Dict[str, float]]],
+        kernel_mix: Optional[Dict[str, float]] = None,
+    ) -> None:
+        self.reference_length = reference_length
+        self.mode = mode
+        self.kernel_cache = kernel_cache
+        self.kernel_mix = kernel_mix or {}
+
+    def _component_weights(self) -> Sequence[Tuple[str, float]]:
+        if self.mode == "composite":
+            return list(self.kernel_mix.items())
+        if self.mode == "hamming":
+            return []
+        return [(self.mode, 1.0)]
+
+    def _composite_kernel(self, seq_a: str, seq_b: str) -> Optional[float]:
+        weights = self._component_weights()
+        if not weights:
+            return None
+        total = 0.0
+        seen = False
+        for name, weight in weights:
+            matrix = self.kernel_cache.get(name)
+            if not matrix:
+                continue
+            value = _lookup_kernel(matrix, seq_a, seq_b)
+            if value is None:
+                continue
+            total += weight * value
+            seen = True
+        if not seen:
+            return None
+        return total
+
+    def pair_distance(self, seq_a: str, seq_b: str) -> float:
+        kernel_value = self._composite_kernel(seq_a, seq_b)
+        if kernel_value is None:
+            return float(hamming_distance(seq_a, seq_b))
+        diag_a = self._composite_kernel(seq_a, seq_a)
+        diag_b = self._composite_kernel(seq_b, seq_b)
+        if diag_a is None or diag_b is None:
+            return float(hamming_distance(seq_a, seq_b))
+        value = diag_a + diag_b - 2.0 * kernel_value
+        if value < 0.0:
+            value = 0.0
+        return math.sqrt(value)
+
+    def min_distance(self, sequence: str, others: Sequence[str]) -> float:
+        if not others:
+            return float(self.reference_length)
+        distances = [self.pair_distance(sequence, other) for other in others]
+        return min(distances) if distances else float(self.reference_length)
+
+
+def compute_pareto_front(
+    candidates: Sequence[CandidateScore],
+    objective_names: Sequence[str],
+) -> List[CandidateScore]:
     front: List[CandidateScore] = []
     for candidate in candidates:
         dominated = False
         for other in candidates:
             if candidate is other:
                 continue
-            if (other.score >= candidate.score and other.distance >= candidate.distance) and (
-                other.score > candidate.score or other.distance > candidate.distance
-            ):
+            dominates = True
+            strictly_better = False
+            for objective in objective_names:
+                candidate_value = _objective_value(candidate, objective)
+                other_value = _objective_value(other, objective)
+                if other_value < candidate_value:
+                    dominates = False
+                    break
+                if other_value > candidate_value:
+                    strictly_better = True
+            if dominates and strictly_better:
                 dominated = True
                 break
         if not dominated:
             front.append(candidate)
-    front.sort(key=lambda item: (-item.score, -item.distance, item.sequence))
+    front.sort(
+        key=lambda item: tuple(-_objective_value(item, name) for name in objective_names)
+        + (item.sequence,),
+    )
     return front
+
+
+def _objective_value(candidate: CandidateScore, objective: str) -> float:
+    if objective == "score":
+        return candidate.score
+    if objective == "diversity":
+        return candidate.kernel_diversity
+    if objective == "uncertainty":
+        return candidate.uncertainty if candidate.uncertainty is not None else 0.0
+    raise ValueError(f"Unsupported objective '{objective}'")
 
 
 def select_next_batch(
@@ -788,56 +1010,81 @@ def select_next_batch(
     diversity_weight: float,
     min_hamming_distance: int,
     reference_length: int,
+    anchor_sequences: Sequence[str],
+    distance_calculator: KernelDistanceCalculator,
+    objective_names: Sequence[str],
 ) -> List[SelectedCandidate]:
     selected: List[SelectedCandidate] = []
-    chosen_sequences: List[str] = []
-    remaining_sequences = set(candidates.keys())
+    chosen_sequences: List[str] = list(anchor_sequences)
+    anchor_entries: List[SelectedCandidate] = []
+    rank_counter = 1
+    for anchor in anchor_sequences:
+        candidate = candidates.get(anchor)
+        if candidate is None:
+            continue
+        composite = candidate.score + diversity_weight * candidate.kernel_diversity
+        anchor_entries.append(
+            SelectedCandidate(
+                sequence=candidate.sequence,
+                score=candidate.score,
+                hamming_distance=candidate.hamming_distance,
+                kernel_diversity=candidate.kernel_diversity,
+                mutations=candidate.mutations,
+                approx_gain=candidate.approx_gain,
+                uncertainty=candidate.uncertainty,
+                rank=rank_counter,
+                composite_score=composite,
+                is_anchor=True,
+            )
+        )
+        rank_counter += 1
+    remaining_sequences = {sequence for sequence in candidates.keys() if sequence not in anchor_sequences}
     while len(selected) < num_select and remaining_sequences:
         candidate_scores: List[CandidateScore] = []
         for sequence in sorted(remaining_sequences):
-            candidate = candidates[sequence]
+            base = candidates[sequence]
             if chosen_sequences:
                 distances = [hamming_distance(sequence, other) for other in chosen_sequences]
-                min_distance = min(distances)
+                min_hamming = min(distances)
             else:
-                min_distance = reference_length
-            if min_distance < min_hamming_distance:
+                min_hamming = reference_length
+            if min_hamming < min_hamming_distance:
                 continue
+            kernel_distance = distance_calculator.min_distance(sequence, chosen_sequences)
             candidate_scores.append(
                 CandidateScore(
                     sequence=sequence,
-                    score=candidate.score,
-                    distance=min_distance,
-                    mutations=candidate.mutations,
-                    approx_gain=candidate.approx_gain,
+                    score=base.score,
+                    hamming_distance=min_hamming,
+                    kernel_diversity=kernel_distance,
+                    mutations=base.mutations,
+                    approx_gain=base.approx_gain,
+                    uncertainty=base.uncertainty,
                 )
             )
         if not candidate_scores:
             break
-        front = compute_pareto_front(candidate_scores)
-        best = max(
-            front,
-            key=lambda item: (
-                item.score + diversity_weight * float(item.distance),
-                item.distance,
-                item.sequence,
-            ),
-        )
-        composite = best.score + diversity_weight * float(best.distance)
+        front = compute_pareto_front(candidate_scores, objective_names)
+        best = front[0]
+        composite = best.score + diversity_weight * best.kernel_diversity
         selected.append(
             SelectedCandidate(
                 sequence=best.sequence,
                 score=best.score,
-                distance=best.distance,
+                hamming_distance=best.hamming_distance,
+                kernel_diversity=best.kernel_diversity,
                 mutations=best.mutations,
                 approx_gain=best.approx_gain,
-                rank=len(selected) + 1,
+                uncertainty=best.uncertainty,
+                rank=rank_counter,
                 composite_score=composite,
+                is_anchor=False,
             )
         )
+        rank_counter += 1
         chosen_sequences.append(best.sequence)
         remaining_sequences.remove(best.sequence)
-    return selected
+    return anchor_entries + selected
 
 
 def export_pairs(path: Path, pairs: Sequence[PreferencePair]) -> None:
@@ -872,7 +1119,15 @@ def export_pairs(path: Path, pairs: Sequence[PreferencePair]) -> None:
 
 
 def export_candidates(path: Path, candidates: Sequence[CandidateScore]) -> None:
-    headers = ["sequence", "predicted_score", "distance", "mutations", "approx_gain"]
+    headers = [
+        "sequence",
+        "predicted_score",
+        "min_hamming_distance",
+        "kernel_diversity",
+        "uncertainty",
+        "mutations",
+        "approx_gain",
+    ]
     with open(path, "w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle, delimiter="\t")
         writer.writerow(headers)
@@ -881,7 +1136,9 @@ def export_candidates(path: Path, candidates: Sequence[CandidateScore]) -> None:
                 [
                     candidate.sequence,
                     f"{candidate.score:.6f}",
-                    candidate.distance,
+                    candidate.hamming_distance,
+                    f"{candidate.kernel_diversity:.6f}",
+                    "" if candidate.uncertainty is None else f"{candidate.uncertainty:.6f}",
                     ";".join(candidate.mutations),
                     f"{candidate.approx_gain:.6f}",
                 ]
@@ -894,9 +1151,12 @@ def export_selection(path: Path, selections: Sequence[SelectedCandidate]) -> Non
         "sequence",
         "predicted_score",
         "min_hamming_distance",
+        "kernel_diversity",
+        "uncertainty",
         "composite_score",
         "mutations",
         "approx_gain",
+        "is_anchor",
     ]
     with open(path, "w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle, delimiter="\t")
@@ -907,10 +1167,13 @@ def export_selection(path: Path, selections: Sequence[SelectedCandidate]) -> Non
                     candidate.rank,
                     candidate.sequence,
                     f"{candidate.score:.6f}",
-                    candidate.distance,
+                    candidate.hamming_distance,
+                    f"{candidate.kernel_diversity:.6f}",
+                    "" if candidate.uncertainty is None else f"{candidate.uncertainty:.6f}",
                     f"{candidate.composite_score:.6f}",
                     ";".join(candidate.mutations),
                     f"{candidate.approx_gain:.6f}",
+                    "yes" if candidate.is_anchor else "no",
                 ]
             )
 
@@ -931,6 +1194,63 @@ def _to_int(value: Optional[str]) -> Optional[int]:
         return int(float(value))
     except (TypeError, ValueError):
         return None
+
+
+def parse_objective_list(raw: str) -> List[str]:
+    objectives = [token.strip().lower() for token in raw.split(",") if token.strip()]
+    if not objectives:
+        raise ValueError("At least one objective must be provided")
+    allowed = {"score", "diversity", "uncertainty"}
+    for objective in objectives:
+        if objective not in allowed:
+            raise ValueError(f"Unsupported objective '{objective}' in --pareto-objectives")
+    if "score" not in objectives:
+        objectives.insert(0, "score")
+    return objectives
+
+
+def should_include_uncertainty(mode: str, records: Sequence[Dict[str, object]]) -> bool:
+    if mode == "never":
+        return False
+    if mode == "always":
+        return True
+    conditions = {str(record.get("condition", "")) for record in records}
+    return len(conditions) <= 1
+
+
+def load_mu_sigma(path: Path) -> Dict[str, float]:
+    if not path.exists():
+        raise FileNotFoundError(f"Sigma file {path} does not exist")
+    with open(path, "r", encoding="utf-8") as handle:
+        first_line = handle.readline()
+        if not first_line:
+            return {}
+        delimiter = _infer_delimiter(first_line)
+        header = [token.strip().lower() for token in first_line.strip().split(delimiter)]
+        sequence_index = header.index("sequence") if "sequence" in header else 0
+        sigma_column_candidates = [
+            idx
+            for idx, name in enumerate(header)
+            if name in {"sigma", "posterior_sigma", "posterior_std", "posterior_stddev"}
+        ]
+        if not sigma_column_candidates:
+            raise ValueError(
+                "Sigma file must contain a column named one of: sigma, posterior_sigma, posterior_std, posterior_stddev"
+            )
+        sigma_index = sigma_column_candidates[0]
+        sigma_map: Dict[str, float] = {}
+        for line in handle:
+            if not line.strip():
+                continue
+            parts = [token.strip() for token in line.strip().split(delimiter)]
+            if len(parts) <= max(sequence_index, sigma_index):
+                continue
+            sequence = parts[sequence_index]
+            try:
+                sigma_map[sequence] = float(parts[sigma_index])
+            except ValueError:
+                continue
+    return sigma_map
 
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
@@ -1005,24 +1325,82 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             )
             for record in sorted(aggregated_records, key=lambda item: float(item["objective"]), reverse=True)
         ]
+    reference_length = len(reference_sequence)
+    pareto_objectives = parse_objective_list(args.pareto_objectives)
+    include_uncertainty = should_include_uncertainty(args.use_sigma_objective, aggregated_records)
+    sigma_map: Dict[str, float] = {}
+    if args.kermut_mu_sigma:
+        sigma_map = load_mu_sigma(Path(args.kermut_mu_sigma))
+    if include_uncertainty and sigma_map:
+        if "uncertainty" not in pareto_objectives:
+            pareto_objectives = pareto_objectives + ["uncertainty"]
+    else:
+        pareto_objectives = [obj for obj in pareto_objectives if obj != "uncertainty"]
+    kernel_mode = args.kernel_mode.lower()
+    kernel_mix: Dict[str, float] = {}
+    kernel_cache: Dict[str, Dict[str, Dict[str, float]]] = {}
+    kernel_names: List[str] = []
+    if kernel_mode == "composite":
+        if not args.kernel_mix:
+            raise ValueError("--kernel-mix must be provided when --kernel-mode is 'composite'")
+        kernel_mix = load_kernel_mix(Path(args.kernel_mix))
+        total_weight = sum(abs(weight) for weight in kernel_mix.values())
+        if total_weight > 0.0:
+            kernel_mix = {name: weight / total_weight for name, weight in kernel_mix.items()}
+        kernel_names = list(kernel_mix.keys())
+    elif kernel_mode != "hamming":
+        kernel_names = [kernel_mode]
+    if kernel_names and args.kermut_kernel_cache:
+        kernel_cache = load_kernel_cache(Path(args.kermut_kernel_cache), kernel_names)
+    distance_calculator = KernelDistanceCalculator(
+        reference_length=reference_length,
+        mode=kernel_mode,
+        kernel_cache=kernel_cache,
+        kernel_mix=kernel_mix if kernel_mix else None,
+    )
+    objective_lookup = {str(record["sequence"]): float(record["objective"]) for record in aggregated_records}
     candidate_scores: Dict[str, CandidateScore] = {}
     for proposal in candidate_proposals:
         features = featurizer.vector(proposal.sequence)
         score = preference_net.score(features)
+        sigma = sigma_map.get(proposal.sequence) if sigma_map else None
         candidate_scores[proposal.sequence] = CandidateScore(
             sequence=proposal.sequence,
             score=score,
-            distance=0,
+            hamming_distance=reference_length,
+            kernel_diversity=float(reference_length),
             mutations=proposal.mutations,
             approx_gain=proposal.approx_gain,
+            uncertainty=sigma,
         )
-    reference_length = len(reference_sequence)
+    anchor_sequences = sorted(anchors.keys())
+    for anchor_sequence in anchor_sequences:
+        if anchor_sequence in candidate_scores:
+            anchor_entry = candidate_scores[anchor_sequence]
+            anchor_entry.hamming_distance = 0
+            anchor_entry.kernel_diversity = 0.0
+            continue
+        features = featurizer.vector(anchor_sequence)
+        score = preference_net.score(features)
+        sigma = sigma_map.get(anchor_sequence) if sigma_map else None
+        candidate_scores[anchor_sequence] = CandidateScore(
+            sequence=anchor_sequence,
+            score=score,
+            hamming_distance=0,
+            kernel_diversity=0.0,
+            mutations=sequence_mutations(reference_sequence, anchor_sequence),
+            approx_gain=objective_lookup.get(anchor_sequence, 0.0),
+            uncertainty=sigma,
+        )
     selections = select_next_batch(
         candidate_scores,
         args.num_select,
         args.diversity_weight,
         args.min_hamming_distance,
         reference_length,
+        anchor_sequences,
+        distance_calculator,
+        pareto_objectives,
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     export_selection(output_dir / "next_batch.tsv", selections)
@@ -1031,20 +1409,23 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     if args.export_candidates:
         # Export the full pool with diversity computed relative to selections for transparency
         enriched_candidates: List[CandidateScore] = []
+        diversity_reference = [selection.sequence for selection in selections]
         for sequence, candidate in candidate_scores.items():
-            if selections:
-                min_distance = min(
-                    hamming_distance(sequence, selected.sequence) for selected in selections
-                )
+            if diversity_reference:
+                min_hamming = min(hamming_distance(sequence, selected) for selected in diversity_reference)
+                kernel_diversity = distance_calculator.min_distance(sequence, diversity_reference)
             else:
-                min_distance = reference_length
+                min_hamming = reference_length
+                kernel_diversity = float(reference_length)
             enriched_candidates.append(
                 CandidateScore(
                     sequence=sequence,
                     score=candidate.score,
-                    distance=min_distance,
+                    hamming_distance=min_hamming,
+                    kernel_diversity=kernel_diversity,
                     mutations=candidate.mutations,
                     approx_gain=candidate.approx_gain,
+                    uncertainty=candidate.uncertainty,
                 )
             )
         export_candidates(Path(args.export_candidates), enriched_candidates)
